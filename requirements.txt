@@ -1,0 +1,9 @@
+﻿numpy
+pandas
+scikit-learn
+scipy
+torch
+wfdb
+transformers
+safetensors
+reportlab
