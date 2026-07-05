@@ -16,7 +16,12 @@ CACHE = Path(os.environ.get(
     "CACHE",
     BASE / "pgrf_backbone_sequence_cache_v1" / "stmem" / "pgrf_stmem_sequence_cache_temporal.npz",
 ))
-OUT = BASE / os.environ.get("RUN_NAME", "pgrf_ablation_stmem_temporal_v1")
+BACKBONE = os.environ.get("BACKBONE", "ST-MEM")
+RUN_NAME = os.environ.get(
+    "RUN_NAME",
+    f"pgrf_ablation_{BACKBONE.lower().replace('-', '_').replace(' ', '_')}_temporal_v1",
+)
+OUT = BASE / RUN_NAME
 OUT.mkdir(parents=True, exist_ok=True)
 
 LABELS = ["in_hospital_mortality", "mortality_30d", "mortality_1y"]
@@ -183,7 +188,9 @@ class PGRFAblation(nn.Module):
 
         self.gru = nn.GRU(d + 2, hidden, batch_first=True)
         self.gru_head = nn.Sequential(nn.LayerNorm(hidden), nn.Dropout(dropout), nn.Linear(hidden, k))
-        self.beta_head = nn.Sequential(nn.Linear(hidden + 5, hidden), nn.GELU(), nn.Dropout(dropout), nn.Linear(hidden, 1))
+        # Endpoint-wise residual gate. This matches the main PGRF implementation:
+        # beta has shape [batch, K], not a single sample-level scalar.
+        self.beta_head = nn.Sequential(nn.Linear(hidden + 5, hidden), nn.GELU(), nn.Dropout(dropout), nn.Linear(hidden, k))
         if not self.gru_only:
             nn.init.zeros_(self.gru_head[-1].weight)
             nn.init.zeros_(self.gru_head[-1].bias)
@@ -198,7 +205,7 @@ class PGRFAblation(nn.Module):
         hgru = hn[-1]
 
         if self.gru_only:
-            beta = torch.ones((x.shape[0], 1), device=x.device)
+            beta = torch.ones((x.shape[0], self.gru_head[-1].out_features), device=x.device)
             alpha = prior
             return self.gru_head(hgru), alpha, beta
 
@@ -236,7 +243,7 @@ class PGRFAblation(nn.Module):
         base_logits = self.base_head(base_feat)
 
         if not self.use_recurrent:
-            beta = torch.zeros((x.shape[0], 1), device=x.device)
+            beta = torch.zeros((x.shape[0], base_logits.shape[1]), device=x.device)
             return base_logits, alpha, beta
 
         beta = torch.sigmoid(self.beta_head(torch.cat([hgru, gate_stats], dim=1)))
@@ -397,7 +404,7 @@ def main():
             for cal, P in [("raw", raw_p), ("platt", platt_p)]:
                 m = compute_metrics(Y[te], P)
                 rows.append({
-                    "backbone": "ST-MEM",
+                    "backbone": BACKBONE,
                     "split": "temporal",
                     "variant": variant,
                     "variant_pretty": PRETTY[variant],
@@ -407,7 +414,7 @@ def main():
                 })
                 for r in m["per_label"]:
                     per_rows.append({
-                        "backbone": "ST-MEM",
+                        "backbone": BACKBONE,
                         "split": "temporal",
                         "variant": variant,
                         "variant_pretty": PRETTY[variant],
@@ -435,7 +442,7 @@ def main():
     ])
 
     lines = [
-        "# ST-MEM Temporal PGRF Module Ablation",
+        f"# {BACKBONE} Temporal PGRF Module Ablation",
         "",
         "| Variant | Calibration | AUROC | AUPRC | Brier | ECE |",
         "|---|---|---:|---:|---:|---:|",
@@ -450,7 +457,19 @@ def main():
         )
     (OUT / "PGRF_PGRF_Ablation_Report.md").write_text("\n".join(lines), encoding="utf-8")
     with (OUT / "pgrf_ablation_summary.json").open("w", encoding="utf-8") as f:
-        json.dump({"cache": str(CACHE), "out": str(OUT), "seeds": SEEDS, "epochs": EPOCHS, "elapsed_sec": time.time() - started}, f, indent=2)
+        json.dump(
+            {
+                "backbone": BACKBONE,
+                "cache": str(CACHE),
+                "out": str(OUT),
+                "seeds": SEEDS,
+                "epochs": EPOCHS,
+                "beta_gate": "endpoint-wise vector",
+                "elapsed_sec": time.time() - started,
+            },
+            f,
+            indent=2,
+        )
     print("\n".join(lines), flush=True)
     print("[DONE]", OUT, "elapsed", time.time() - started, flush=True)
 

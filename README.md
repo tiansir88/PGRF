@@ -69,6 +69,11 @@ python scripts/03_training/build_shuffled_history_cache.py
 python scripts/03_training/summarize_shuffled_history_control.py
 python scripts/04_ablation/run_ablation_stmem_temporal.py
 
+# Optional: repeat the same key ablation on another backbone, e.g. CLEAR-HUG.
+BACKBONE=CLEAR-HUG CACHE=/path/to/clearhug_temporal_count_ge2.npz \
+RUN_NAME=pgrf_ablation_clearhug_temporal_v1 \
+python scripts/04_ablation/run_ablation_stmem_temporal.py
+
 # 6. Generate tables and figures.
 python scripts/05_evaluation/create_ensemble_table.py
 python scripts/05_evaluation/create_ensemble_bootstrap.py
